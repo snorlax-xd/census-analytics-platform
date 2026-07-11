@@ -18,7 +18,3 @@ dist/
 Backend/uploads/
 Backend/scripts/_boundary_work/
 *.db
-
-# Documentation
-*.md
-!README.md
