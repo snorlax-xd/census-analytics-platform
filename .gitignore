@@ -7,19 +7,16 @@ __pycache__/
 # Node / React
 node_modules/
 dist/
+*.tsbuildinfo
 
 # Environment files
 .env
 
 # Local app data
 Backend/uploads/
+Backend/scripts/_boundary_work/
 *.db
 
-
-Backend/.venv/
-Frontend/node_modules/
-Frontend/dist/
-*.tsbuildinfo
-
+# Documentation
 *.md
 !README.md
