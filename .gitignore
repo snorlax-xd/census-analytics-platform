@@ -15,3 +15,11 @@ dist/
 Backend/uploads/
 *.db
 
+
+Backend/.venv/
+Frontend/node_modules/
+Frontend/dist/
+*.tsbuildinfo
+
+*.md
+!README.md
