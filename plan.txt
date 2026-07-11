@@ -1,0 +1,137 @@
+Phase 0 — Environment & project setup
+
+
+
+Install: Python 3.11+, Node.js LTS, Git. Use Docker for Postgres (you've already worked with Docker, so this is familiar ground) rather than installing Postgres natively.
+
+Repo structure: two top-level folders, /backend (FastAPI) and /frontend (React), plus a docker-compose.yml running a Postgres container.
+
+Backend: create a virtual environment, pip install fastapi uvicorn sqlalchemy psycopg2-binary alembic pydantic python-dotenv.
+
+Frontend: npm create vite@latest frontend -- --template react (Vite over Create React App — faster, simpler, actively maintained). Then npm install react-router-dom @tanstack/react-query axios recharts react-simple-maps d3-scale tailwindcss.
+
+Git: init, .gitignore (node_modules, __pycache__, .env), first commit.
+
+
+
+Done when: docker compose up starts Postgres, uvicorn main:app --reload serves a "hello world" FastAPI route, npm run dev serves a blank Vite React page.
+
+Phase 1 — Database schema and real data
+
+
+
+Tables (via Alembic migrations, not raw SQL — gets you migration history for free):
+
+
+
+locales — id, iso_code, name, type (state/ut), centroid_lat, centroid_lng
+
+measures — id, name, unit, category, higher_is_better (nullable bool) — this is the flag both specs depend on, build it in from the start.
+
+fact_values — id, locale_id, measure_id, year, value (the tall/long fact table both tabs read from)
+
+state_adjacency — state_code, neighbor_code, shared_border_length (for Tab 2's neighbor preset)
+
+
+
+
+
+Data sourcing: download actual Census 2011 tables from censusindia.gov.in (state-level population, literacy, sex ratio, density) and boundary data from Survey of India / an official GIS source, per the Tab 1 spec's data-source decision.
+
+Write a one-off Python seed script that reads the CSVs and inserts into fact_values — don't hand-type this data.
+
+Preprocess the boundary GeoJSON with mapshaper into two versions (simplified for national view, full-detail for focused view), store as static files served by the frontend.
+
+
+
+Done when: you can run a raw SQL query and get Maharashtra's 2011 literacy rate back correctly.
+
+Phase 2 — Backend API
+
+
+
+FastAPI structure: main.py, routers/analytics.py, models.py (SQLAlchemy), schemas.py (Pydantic response models), db.py (session handling).
+
+Build the single flexible endpoint first: GET /api/v1/analytics?states=MH,GJ&year=2011&metrics=all.
+
+Then the two preset endpoints: GET /api/v1/presets/closest?anchor=MH&metric=literacy_rate&year=2011 and GET /api/v1/presets/neighbor?anchor=MH.
+
+Add CORSMiddleware so your local Vite dev server (port 5173) can call your local FastAPI server (port 8000) — a very common first-time stumbling block, handle it now.
+
+Test everything through FastAPI's built-in Swagger UI at /docs before writing any frontend code — you can fully verify the API works with zero frontend involved.
+
+
+
+Done when: hitting these endpoints in /docs returns correct, real JSON for any two states you test.
+
+Phase 3 — Frontend scaffolding
+
+
+
+Set up react-router-dom with routes: /tab1, /tab1/state/:id, /tab2.
+
+Wrap the app in a TanStack Query QueryClientProvider — this is what gives you loading/error states for free later.
+
+Basic layout: a top nav switching between the two tabs.
+
+One test API call using useQuery + axios against your Phase 2 endpoint, logged to console — confirms frontend↔backend wiring works before you build any real UI on top of it.
+
+
+
+Done when: you can navigate between blank Tab 1 / Tab 2 pages, and one real API call succeeds.
+
+Phase 4 — Tab 1
+
+Build in this order, each step playable before the next:
+
+
+
+Render the simplified India topojson using react-simple-maps (ComposableMap + Geographies) — this library wraps D3 in React components, much friendlier than raw D3 for a first pass.
+
+Add the metric selector as a button group; wire it to a d3-scale-quantile color scale that recolors states on change.
+
+Simplify the label logic for v1: the spec's three-tier cascade (full name → code → leader line) is genuinely fiddly to get right (measuring rendered bounding boxes at runtime). I'd suggest shipping v1 with just the ISO code on every state, get the rest of the map working end-to-end, then come back and add the cascade as a refinement pass — rather than blocking your first working map on getting text-fitting logic exactly right.
+
+Add pan/zoom via react-simple-maps's built-in ZoomableGroup — comes free with the library, not something you build from scratch.
+
+Click a state → navigate('/tab1/state/' + id) via useNavigate. Build the focused state view as its own route/component, fetching that state's full metric set.
+
+Minimize → navigate('/tab1').
+
+Islands inset: a second, smaller ComposableMap positioned via CSS in a fixed corner — genuinely just a second map instance, not special logic.
+
+Quick-zoom chips: buttons that set the ZoomableGroup's center/zoom props programmatically.
+
+
+
+Done when: the full click→focus→minimize loop works against real data for at least a handful of states.
+
+Phase 5 — Tab 2
+
+
+
+Two state-selector inputs (a simple filtered dropdown is fine to start — react-select if you want search-as-you-type without building it yourself).
+
+Swap button, presets (call the Phase 2 preset endpoints), undo (a single cached "previous state B" value, per the spec — not a history stack).
+
+Scorecard table, then diverging bar chart and radar chart with Recharts — once you've built one Recharts chart, the rest follow the same pattern.
+
+Reuse the Tab 1 map component in a "highlight two states" mode for the mini map.
+
+National average toggle, per-capita toggle.
+
+The four wow-factor items last: verdict card (pure frontend calculation off data you already have), ranking badges (from the include_rank param), chart animations (mostly just not disabling Recharts defaults), shared state-color module used by both tabs.
+
+
+
+Done when: picking any two states renders a complete, correct comparison.
+
+Phase 6 — Polish pass
+
+
+
+Handle loading and error states everywhere using what TanStack Query already gives you (isLoading, isError) — don't let a slow network request show a blank screen.
+
+Test on an actual narrow mobile viewport, not just by resizing a desktop browser window.
+
+Go through both spec docs (tab1.md, tab2.md) line by line as a manual QA checklist against what you've built.

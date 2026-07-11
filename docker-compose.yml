@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: census_analytics_postgres
+    environment:
+      POSTGRES_DB: census_analytics
+      POSTGRES_USER: census
+      POSTGRES_PASSWORD: census
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U census -d census_analytics"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+
