@@ -20,6 +20,13 @@ This exists because the source data's state field turned out to be numeric
 Census 2011 state codes, not names — a silent wrong mapping here would
 mislabel a region everywhere downstream (map, choropleth, API), so this is
 not a step to skip or automate past without a human check.
+
+ALSO IMPORTANT: whenever this script is edited, re-run it with --write
+again before regenerating anything downstream (e.g. mapshaper). A past
+session mistake was re-running mapshaper against a stale output file
+after this script was updated but not re-run — don't repeat that. Before
+trusting a --write run after an edit, diff this file against what you
+expect to confirm the edit actually landed.
 """
 import argparse
 import json
@@ -29,6 +36,7 @@ from pathlib import Path
 import py7zr
 from shapely.geometry import shape, mapping
 from shapely.ops import unary_union
+from shapely.geometry.polygon import orient
 
 URL = "https://github.com/yashveeeeeeer/india-geodata/releases/download/census/2011/Districts_2011.geojsonl.7z"
 WORKDIR = Path(__file__).parent / "_boundary_work"
@@ -38,9 +46,6 @@ OUTPUT_STATE_LEVEL = WORKDIR / "india_states_2011.geojson"
 
 STATE_FIELD_CANDIDATES = ["ST_NM", "STATE", "State_Name", "st_nm", "STNAME", "NAME_1"]
 
-# Standard Census of India 2011 state/UT census codes. This is a well-known
-# government convention, but is still being verified via the dry-run
-# centroid check below rather than trusted outright — see module docstring.
 CENSUS_CODE_TO_NAME = {
     "01": "Jammu and Kashmir", "02": "Himachal Pradesh", "03": "Punjab",
     "04": "Chandigarh", "05": "Uttarakhand", "06": "Haryana",
@@ -55,9 +60,6 @@ CENSUS_CODE_TO_NAME = {
     "34": "Puducherry", "35": "Andaman and Nicobar Islands",
 }
 
-# Rough expected centroid (lat, lon) for a sanity check — not precise,
-# just enough to catch a gross mislabel (e.g. a tiny island territory
-# centroid landing in the middle of the mainland would be a red flag).
 EXPECTED_ROUGH_LOCATION = {
     "Jammu and Kashmir": (34, 76), "Himachal Pradesh": (32, 77),
     "Punjab": (31, 75), "Chandigarh": (30.7, 76.8), "Uttarakhand": (30, 79),
@@ -122,8 +124,6 @@ def load_features(geojsonl_path: Path):
 
 
 def resolve_name(raw_value: str) -> str:
-    """Map either a numeric census code or an already-textual name to our
-    standard state/UT name."""
     raw = raw_value.strip()
     if raw in CENSUS_CODE_TO_NAME:
         return CENSUS_CODE_TO_NAME[raw]
@@ -183,6 +183,28 @@ def dry_run_report(dissolved: dict):
         )
 
 
+def fix_winding(geom):
+    """
+    EMPIRICALLY CONFIRMED (see the session's test_flipped_winding.py check):
+    this pipeline's d3-geo `geoMercator`/`geoPath` rendering requires
+    CLOCKWISE exterior rings (sign=-1.0), not the RFC7946-standard
+    counter-clockwise (sign=1.0). sign=1.0 caused every polygon to render
+    as a full-canvas frame (d3-geo's clip stream treating each ring as
+    inside-out, stitching it to the projection's clip boundary). This was
+    verified directly: flipping to sign=-1.0 produced correct, tight,
+    per-state bounding boxes through the exact same d3-geo call, sign=1.0
+    did not, with source geometry (Shapely-validated) identical in both
+    tests. Do not revert this to sign=1.0 based on the RFC7946 spec text
+    alone — it does not match what this toolchain actually needs.
+    """
+    if geom.geom_type == "Polygon":
+        return orient(geom, sign=-1.0)
+    if geom.geom_type == "MultiPolygon":
+        from shapely.geometry import MultiPolygon
+        return MultiPolygon([orient(p, sign=-1.0) for p in geom.geoms])
+    return geom
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--write", action="store_true", help="Actually write the output file (default: dry run only)")
@@ -195,6 +217,7 @@ def main():
     print(f"Loaded {len(features)} district features\n")
 
     dissolved = group_and_dissolve(features)
+    dissolved = {name: fix_winding(geom) for name, geom in dissolved.items()}
 
     if not args.write:
         dry_run_report(dissolved)

@@ -18,3 +18,5 @@ dist/
 Backend/uploads/
 Backend/scripts/_boundary_work/
 *.db
+
+codex chat.pdf

@@ -8,6 +8,7 @@
     "@tanstack/react-query": "latest",
     "@vitejs/plugin-react": "latest",
     "axios": "latest",
+    "d3-geo": "^3.1.1",
     "d3-scale": "latest",
     "lucide-react": "latest",
     "react": "latest",
