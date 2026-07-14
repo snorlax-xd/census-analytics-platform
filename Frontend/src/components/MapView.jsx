@@ -1,5 +1,6 @@
 import { geoMercator, geoPath } from "d3-geo";
 import indiaGeoJson from "../assets/india-simplified.json";
+import { localeCodeByName } from "../lib/locales";
 
 const WIDTH = 900;
 const HEIGHT = 800;
@@ -80,7 +81,7 @@ try {
   console.error("[MapView] Boundary data validation failed:", err.message);
 }
 
-export function MapView() {
+export function MapView({ valuesByCode = new Map(), colorForValue = (_value) => "#e2e8f0" }) {
   if (validationError) {
     return (
       <div
@@ -109,13 +110,31 @@ export function MapView() {
       style={{ width: "100%", height: "auto", display: "block" }}
     >
       {indiaGeoJson.features.map((feature) => (
-        <path
-          key={feature.properties.name}
-          d={pathGenerator(feature)}
-          stroke="#334155"
-          strokeWidth={0.5}
-          fill="#e2e8f0"
-        />
+        <g key={feature.properties.name}>
+          <path
+            d={pathGenerator(feature)}
+            stroke="#f8fafc"
+            strokeWidth={0.8}
+            fill={colorForValue(valuesByCode.get(localeCodeByName.get(feature.properties.name)))}
+          />
+          {localeCodeByName.has(feature.properties.name) ? (
+            <text
+              x={pathGenerator.centroid(feature)[0]}
+              y={pathGenerator.centroid(feature)[1]}
+              textAnchor="middle"
+              dominantBaseline="central"
+              fill="#0f172a"
+              fontSize={11}
+              fontWeight={700}
+              pointerEvents="none"
+              paintOrder="stroke"
+              stroke="#ffffff"
+              strokeWidth={2.5}
+            >
+              {localeCodeByName.get(feature.properties.name)}
+            </text>
+          ) : null}
+        </g>
       ))}
     </svg>
   );
