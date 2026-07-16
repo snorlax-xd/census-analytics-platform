@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { MapView } from "../components/MapView";
 import { useAnalyticsQuery } from "../api/queries";
@@ -9,6 +10,13 @@ const metricOptions = [
   { code: "population", label: "Population" },
   { code: "sex_ratio", label: "Sex Ratio" },
   { code: "literacy_rate", label: "Literacy Rate" },
+];
+
+const metricCodes = new Set(metricOptions.map((metric) => metric.code));
+
+const zoomTargets = [
+  { label: "Northeast", center: [94, 26], zoom: 3.2 },
+  { label: "Delhi NCR", center: [77.2, 28.6], zoom: 5.2 },
 ];
 
 const numberFormatter = new Intl.NumberFormat("en-IN", {
@@ -26,7 +34,12 @@ function formatValue(value: number, unit?: string) {
 }
 
 export function Tab1() {
-  const [selectedMetric, setSelectedMetric] = useState(metricOptions[0].code);
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const metricFromUrl = searchParams.get("metric");
+  const initialMetric = metricFromUrl && metricCodes.has(metricFromUrl) ? metricFromUrl : metricOptions[0].code;
+  const [selectedMetric, setSelectedMetric] = useState(initialMetric);
+  const [mapPosition, setMapPosition] = useState({ center: [82, 22], zoom: 1 });
   const analyticsQuery = useAnalyticsQuery(localeCodes);
 
   const metricValues = useMemo(() => {
@@ -54,6 +67,19 @@ export function Tab1() {
   const selectedMetricLabel =
     metricOptions.find((metric) => metric.code === selectedMetric)?.label ?? "Metric";
 
+  function selectMetric(metricCode: string) {
+    setSelectedMetric(metricCode);
+    setSearchParams({ metric: metricCode }, { replace: true });
+  }
+
+  function focusRegion(center: number[], zoom: number) {
+    setMapPosition({ center, zoom });
+  }
+
+  function openState(code: string) {
+    navigate(`/tab1/state/${code}?metric=${selectedMetric}`);
+  }
+
   return (
     <section className="mx-auto max-w-6xl px-6 py-8">
       <div className="mb-6 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
@@ -65,13 +91,13 @@ export function Tab1() {
           </p>
         </div>
 
-        <div className="inline-flex w-fit rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+        <div className="inline-flex w-fit rounded-xl border border-slate-300 bg-white p-ui-1 shadow-card">
           {metricOptions.map((metric) => (
             <button
               key={metric.code}
               type="button"
-              onClick={() => setSelectedMetric(metric.code)}
-              className={`rounded-md px-4 py-2 text-sm font-semibold transition ${
+              onClick={() => selectMetric(metric.code)}
+              className={`rounded-lg px-ui-4 py-ui-2 text-ui-body font-ui-semibold transition ${
                 selectedMetric === metric.code
                   ? "bg-slate-950 text-white"
                   : "text-slate-600 hover:bg-slate-100"
@@ -92,7 +118,7 @@ export function Tab1() {
             <h3 className="text-lg font-semibold text-slate-950">India, Census 2011</h3>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-x-ui-4 gap-y-ui-2">
             {analyticsQuery.isLoading ? (
               <span className="text-sm text-slate-500">Loading metric data...</span>
             ) : analyticsQuery.isError ? (
@@ -101,12 +127,15 @@ export function Tab1() {
               </span>
             ) : (
               metricValues.buckets.map((bucket) => (
-                <div key={`${bucket.color}-${bucket.min}-${bucket.max}`} className="flex items-center gap-2">
+                <div
+                  key={`${bucket.color}-${bucket.min}-${bucket.max}`}
+                  className="flex items-center gap-ui-2 rounded-md border border-slate-200 bg-white/80 px-ui-2 py-ui-1 shadow-card"
+                >
                   <span
-                    className="h-3 w-5 rounded-sm border border-slate-200"
+                    className="h-ui-2 w-ui-5 rounded-sm border border-slate-200"
                     style={{ backgroundColor: bucket.color }}
                   />
-                  <span className="text-xs font-medium text-slate-600">
+                  <span className="text-ui-caption font-ui-semibold text-slate-600">
                     {formatValue(bucket.min, metricValues.unit)} -{" "}
                     {formatValue(bucket.max, metricValues.unit)}
                   </span>
@@ -116,10 +145,54 @@ export function Tab1() {
           </div>
         </div>
 
-        <MapView
-          valuesByCode={metricValues.valuesByCode}
-          colorForValue={metricValues.colorForValue}
-        />
+        <div className="border-b border-slate-200 px-5 py-3">
+          <div className="flex flex-wrap items-center gap-ui-2">
+            {zoomTargets.map((target) => (
+              <button
+                key={target.label}
+                type="button"
+                onClick={() => focusRegion(target.center, target.zoom)}
+                className="rounded-full border border-teal-200 bg-teal-50 px-ui-3 py-ui-1 text-ui-caption font-ui-semibold text-teal-800 shadow-card transition hover:bg-teal-100"
+              >
+                {target.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="min-w-0">
+            <MapView
+              valuesByCode={metricValues.valuesByCode}
+              colorForValue={metricValues.colorForValue}
+              zoomEnabled
+              zoomCenter={mapPosition.center}
+              zoom={mapPosition.zoom}
+              avoidLabelCollisions
+              onMoveEnd={({ coordinates, zoom }: { coordinates: number[]; zoom: number }) =>
+                setMapPosition({ center: coordinates, zoom })
+              }
+              onStateClick={openState}
+            />
+          </div>
+
+          <div className="border-t border-slate-200 bg-slate-50/80 p-4 lg:border-l lg:border-t-0">
+            <div className="sticky top-4 rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                Islands
+              </p>
+              <MapView
+                valuesByCode={metricValues.valuesByCode}
+                colorForValue={metricValues.colorForValue}
+                featureCodes={["AN", "LD"]}
+                showLabels
+                islandInset
+                avoidLabelCollisions={false}
+                onStateClick={openState}
+              />
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   );

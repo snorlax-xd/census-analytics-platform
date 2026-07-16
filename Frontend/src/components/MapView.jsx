@@ -1,15 +1,22 @@
+import { useMemo } from "react";
 import { geoMercator, geoPath } from "d3-geo";
+import { ComposableMap, ZoomableGroup } from "react-simple-maps";
+import indiaIslandsGeoJson from "../assets/india-islands-detail.json";
 import indiaGeoJson from "../assets/india-simplified.json";
 import { localeCodeByName } from "../lib/locales";
 
 const WIDTH = 900;
 const HEIGHT = 800;
+const ISLAND_LAYOUTS = new Map([
+  ["AN", { x: 40, y: 52, width: 820, height: 310, label: "Andaman & Nicobar" }],
+  ["LD", { x: 40, y: 450, width: 820, height: 290, label: "Lakshadweep" }],
+]);
 const EXPECTED_FEATURE_COUNT = 35; // 2011-era states/UTs — see DATABASE.md §2
 
 // Computed once, at module load — fitSize gives the correct scale and
 // translate for this exact geometry and canvas size, no guessing.
-const projection = geoMercator().fitSize([WIDTH, HEIGHT], indiaGeoJson);
-const pathGenerator = geoPath(projection);
+const defaultProjection = geoMercator().fitSize([WIDTH, HEIGHT], indiaGeoJson);
+const defaultPathGenerator = geoPath(defaultProjection);
 
 /**
  * Validates the loaded boundary data BEFORE rendering, instead of trusting
@@ -48,7 +55,7 @@ function validateBoundaryData(geojson) {
 
   // The specific signature of the winding-order bug: every feature's
   // projected bounds collapsing to the exact canvas frame.
-  const boundsList = features.map((f) => pathGenerator.bounds(f));
+  const boundsList = features.map((f) => defaultPathGenerator.bounds(f));
   const allIdentical = boundsList.every(
     (b) =>
       b[0][0] === boundsList[0][0][0] &&
@@ -81,7 +88,146 @@ try {
   console.error("[MapView] Boundary data validation failed:", err.message);
 }
 
-export function MapView({ valuesByCode = new Map(), colorForValue = (_value) => "#e2e8f0" }) {
+/**
+ * @param {{
+ *   valuesByCode?: Map<string, number>,
+ *   colorForValue?: (value: number | undefined) => string,
+ *   featureCodes?: string[],
+ *   zoomEnabled?: boolean,
+ *   zoomCenter?: number[],
+ *   zoom?: number,
+ *   onMoveEnd?: (position: { coordinates: number[], zoom: number }) => void,
+ *   onStateClick?: (code: string) => void,
+ *   selectedCode?: string,
+ *   dimUnselected?: boolean,
+ *   showLabels?: boolean,
+ *   avoidLabelCollisions?: boolean,
+ *   islandInset?: boolean,
+ *   className?: string,
+ * }} props
+ */
+export function MapView({
+  valuesByCode = new Map(),
+  colorForValue = (_value) => "#e2e8f0",
+  featureCodes = undefined,
+  zoomEnabled = false,
+  zoomCenter = [82, 22],
+  zoom = 1,
+  onMoveEnd = undefined,
+  onStateClick = undefined,
+  selectedCode = undefined,
+  dimUnselected = false,
+  showLabels = true,
+  avoidLabelCollisions = false,
+  islandInset = false,
+  className = "",
+}) {
+  const filteredFeatures = useMemo(() => {
+    const wantedCodes = featureCodes ? new Set(featureCodes) : null;
+    const sourceGeoJson = islandInset ? indiaIslandsGeoJson : indiaGeoJson;
+
+    return sourceGeoJson.features.filter((feature) => {
+      const code = localeCodeByName.get(feature.properties.name);
+      return !wantedCodes || wantedCodes.has(code);
+    });
+  }, [featureCodes, islandInset]);
+
+  const pathGenerator = useMemo(() => {
+    if (!featureCodes) {
+      return defaultPathGenerator;
+    }
+
+    if (islandInset) {
+      return null;
+    }
+
+    return geoPath(
+      geoMercator().fitSize([WIDTH, HEIGHT], {
+        type: "FeatureCollection",
+        features: filteredFeatures,
+      })
+    );
+  }, [featureCodes, filteredFeatures, islandInset]);
+
+  const islandPathGenerators = useMemo(() => {
+    if (!islandInset) {
+      return new Map();
+    }
+
+    return new Map(
+      filteredFeatures.map((feature) => {
+        const code = localeCodeByName.get(feature.properties.name);
+        const layout = ISLAND_LAYOUTS.get(code) ?? { x: 40, y: 40, width: 820, height: 720 };
+        const projection = geoMercator().fitSize([layout.width, layout.height], feature);
+
+        return [code, { layout, path: geoPath(projection) }];
+      })
+    );
+  }, [filteredFeatures, islandInset]);
+
+  const labelFeatures = useMemo(() => {
+    if (!showLabels) {
+      return new Set();
+    }
+
+    if (!avoidLabelCollisions) {
+      return new Set(filteredFeatures.map((feature) => localeCodeByName.get(feature.properties.name)));
+    }
+
+    const placed = [];
+    const visible = new Set();
+    const labelScale = zoomEnabled ? Math.max(zoom, 1) : 1;
+    const candidates = filteredFeatures
+      .map((feature) => {
+        const code = localeCodeByName.get(feature.properties.name);
+        const islandGenerator = islandPathGenerators.get(code);
+        const generator = islandInset ? islandGenerator?.path : pathGenerator;
+        const bounds = generator?.bounds(feature);
+        const centroid = generator?.centroid(feature);
+        const area = bounds
+          ? Math.max(1, (bounds[1][0] - bounds[0][0]) * (bounds[1][1] - bounds[0][1]))
+          : 1;
+
+        return { feature, code, centroid, area };
+      })
+      .filter((item) => item.code && item.centroid)
+      .sort((left, right) => right.area - left.area);
+
+    for (const item of candidates) {
+      const width = (item.code.length * 7 + 8) / labelScale;
+      const height = 14 / labelScale;
+      const box = {
+        left: item.centroid[0] - width / 2,
+        right: item.centroid[0] + width / 2,
+        top: item.centroid[1] - height / 2,
+        bottom: item.centroid[1] + height / 2,
+      };
+      const collides = placed.some(
+        (existing) =>
+          box.left < existing.right &&
+          box.right > existing.left &&
+          box.top < existing.bottom &&
+          box.bottom > existing.top
+      );
+
+      if (!collides) {
+        placed.push(box);
+        visible.add(item.code);
+      }
+    }
+
+    return visible;
+  }, [
+    avoidLabelCollisions,
+    filteredFeatures,
+    islandInset,
+    islandPathGenerators,
+    pathGenerator,
+    showLabels,
+    zoom,
+    zoomEnabled,
+  ]);
+
   if (validationError) {
     return (
       <div
@@ -104,38 +250,107 @@ export function MapView({ valuesByCode = new Map(), colorForValue = (_value) => 
     );
   }
 
-  return (
-    <svg
-      viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-      style={{ width: "100%", height: "auto", display: "block" }}
-    >
-      {indiaGeoJson.features.map((feature) => (
-        <g key={feature.properties.name}>
-          <path
-            d={pathGenerator(feature)}
-            stroke="#f8fafc"
-            strokeWidth={0.8}
-            fill={colorForValue(valuesByCode.get(localeCodeByName.get(feature.properties.name)))}
-          />
-          {localeCodeByName.has(feature.properties.name) ? (
+  const mapContent = (
+    <>
+      {filteredFeatures.map((feature) => {
+        const code = localeCodeByName.get(feature.properties.name);
+        const isDimmed = dimUnselected && selectedCode && code !== selectedCode;
+        const islandGenerator = islandPathGenerators.get(code);
+        const generator = islandInset ? islandGenerator?.path : pathGenerator;
+        const centroid = generator?.centroid(feature);
+        const layout = islandGenerator?.layout;
+
+        return (
+        <g
+          key={feature.properties.name}
+          transform={layout ? `translate(${layout.x} ${layout.y})` : undefined}
+        >
+          {islandInset && layout ? (
             <text
-              x={pathGenerator.centroid(feature)[0]}
-              y={pathGenerator.centroid(feature)[1]}
+              x={0}
+              y={-18}
+              fill="#475569"
+              fontSize={28}
+              fontWeight={700}
+              pointerEvents="none"
+            >
+              {layout.label}
+            </text>
+          ) : null}
+          <path
+            d={generator?.(feature)}
+            className={onStateClick && code ? "map-state-clickable" : undefined}
+            stroke="#f8fafc"
+            strokeWidth={islandInset ? 2.2 : 0.8}
+            fill={colorForValue(valuesByCode.get(code))}
+            opacity={isDimmed ? 0.16 : 1}
+            role={onStateClick && code ? "button" : undefined}
+            tabIndex={onStateClick && code ? 0 : undefined}
+            style={{ cursor: onStateClick && code ? "pointer" : "default" }}
+            onClick={onStateClick && code ? () => onStateClick(code) : undefined}
+            onKeyDown={
+              onStateClick && code
+                ? (event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onStateClick(code);
+                    }
+                  }
+                : undefined
+            }
+          />
+          {showLabels && code && centroid && labelFeatures.has(code) ? (
+            <text
+              x={centroid[0]}
+              y={centroid[1]}
               textAnchor="middle"
               dominantBaseline="central"
               fill="#0f172a"
-              fontSize={11}
+              fontSize={islandInset ? 34 : 11 / (zoomEnabled ? Math.max(zoom, 1) : 1)}
               fontWeight={700}
               pointerEvents="none"
               paintOrder="stroke"
               stroke="#ffffff"
-              strokeWidth={2.5}
+              strokeWidth={islandInset ? 7 : 2.5 / (zoomEnabled ? Math.max(zoom, 1) : 1)}
             >
-              {localeCodeByName.get(feature.properties.name)}
+              {code}
             </text>
           ) : null}
         </g>
-      ))}
+        );
+      })}
+    </>
+  );
+
+  if (zoomEnabled) {
+    return (
+      <ComposableMap
+        projection="geoMercator"
+        projectionConfig={{ center: [82, 22], scale: 1300 }}
+        width={WIDTH}
+        height={HEIGHT}
+        className={`h-auto w-full ${className}`}
+      >
+        <ZoomableGroup
+          center={zoomCenter}
+          zoom={zoom}
+          minZoom={1}
+          maxZoom={8}
+          onMoveEnd={onMoveEnd}
+        >
+          {mapContent}
+        </ZoomableGroup>
+      </ComposableMap>
+    );
+  }
+
+  return (
+    <svg
+      viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+      className={className}
+      style={{ width: "100%", height: "auto", display: "block" }}
+    >
+      {mapContent}
     </svg>
   );
 }

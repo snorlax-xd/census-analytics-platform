@@ -43,6 +43,10 @@ export const locales: LocaleMeta[] = [
 
 export const localeCodes = locales.map((locale) => locale.code);
 
+export const localeByCode = new Map(
+  locales.map((locale) => [locale.code, locale])
+);
+
 export const localeCodeByName = new Map([
   ...locales.map((locale) => [locale.name, locale.code] as const),
   ["NCT of Delhi", "DL"],

@@ -1,5 +1,30 @@
 @import "tailwindcss";
 
+@theme {
+  --spacing-ui-1: 0.375rem;
+  --spacing-ui-2: 0.625rem;
+  --spacing-ui-3: 0.875rem;
+  --spacing-ui-4: 1.25rem;
+  --spacing-ui-5: 1.75rem;
+
+  --text-ui-caption: 0.6875rem;
+  --text-ui-caption--line-height: 0.95rem;
+  --text-ui-body: 0.875rem;
+  --text-ui-body--line-height: 1.35rem;
+  --text-ui-title: 1.125rem;
+  --text-ui-title--line-height: 1.55rem;
+  --text-ui-display: 1.875rem;
+  --text-ui-display--line-height: 2.25rem;
+
+  --font-weight-ui-regular: 450;
+  --font-weight-ui-semibold: 650;
+  --font-weight-ui-bold: 760;
+
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.06), 0 8px 24px rgb(15 23 42 / 0.08);
+  --shadow-panel: 0 14px 40px rgb(15 23 42 / 0.12);
+  --shadow-float: 0 20px 60px rgb(15 23 42 / 0.16);
+}
+
 html,
 body,
 #root {
@@ -9,4 +34,20 @@ body,
 body {
   margin: 0;
   color: #0f172a;
+}
+
+.map-state-clickable {
+  transition:
+    stroke 160ms ease,
+    stroke-width 160ms ease,
+    filter 160ms ease;
+  vector-effect: non-scaling-stroke;
+}
+
+.map-state-clickable:hover,
+.map-state-clickable:focus-visible {
+  stroke: #0f172a;
+  stroke-width: 1.8;
+  filter: drop-shadow(0 1px 2px rgb(15 23 42 / 0.18));
+  outline: none;
 }
